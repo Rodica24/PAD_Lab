@@ -13,11 +13,189 @@ I plan on having two microservices and an API Gateway:
 * Finance service: Manages all financial data (income, expenses, and savings goals).
 * API Gateway: Centralized access point for clients that routes incoming requests to User Service or Finance Service based on the request path.
 
+![image](https://github.com/user-attachments/assets/fe3826c7-9dd5-4d45-972e-4814721aa357)
+
+
 ## Technology Stack and Communication Patterns
+### Service 1: User Service (Python)
+
+>#### Framework: 
+>FastAPI (for building APIs with Python.)
+>#### Database: 
+>PostgreSQL
+>#### Authentication: 
+>JWT (JSON Web Tokens)
+
+### Service 2: Finance Service (Python)
+>#### Framework:
+>FastAPI (Python) for handling recommendations (RESTful API).
+>#### Database:
+>PostgreSQL
+>
+>Redis: For managing WebSocket sessions in real-time discussions.
+
+### API Gateway
+>Framework: Express.js (Node.js) to serve as a central entry point for external clients and route requests to appropriate microservices
+
+### Communication Patterns
+>#### RESTful APIs:
+>Used for HTTP communication between external clients and the User Service, as well as for basic interactions with the Financial Service.
+>#### gRPC:
+>For efficient communication between services and service discovery.
+>#### WebSocket:
+>For real-time, bidirectional communication between the client and the Financial Service, facilitating live updates for group savings goals.
+>#### Caching:
+Redis is used to cache frequent queries and updates in the Financial Service, improving performance and reducing latency.
+
+
 ## Data Management Design
+### User service endpoints:
+**1. POST /user/register - Registers a new user**
+#### Body   
+```json
+{
+  "username": "string",
+  "email": "string",
+  "password": "string"
+}
+```
+#### Response
+```json
+{
+  "message": "User registered successfully",
+  "userId": "integer"
+}
+```
+
+**2. POST /user/login - Authenticates a user and returns a token**
+#### Body 
+```json
+{
+  "email": "string",
+  "password": "string"
+}
+```
+#### Response
+```json
+{
+  "token": "string",
+  "userId": "integer"
+}
+```
+
+**3. GET /user/{id} - Retrieves a user’s profile**
+#### Response
+```json
+{
+  "userId": "integer",
+  "username": "string",
+  "email": "string"
+}
+```
+
+### Finance service endpoints:
+**1. POST /income - Adds a new income record for a user**
+#### Body 
+```json
+{
+  "userId": "integer",
+  "amount": "float",
+  "source": "string",
+  "date": "string (ISO 8601 format)"
+}
+```
+#### Response
+```json
+{
+  "message": "Income added successfully",
+  "incomeId": "integer"
+}
+```
+
+**2. GET /income/{userId} - Retrieves all income records for a specific user**
+#### Response
+```json
+{
+  "incomes": [
+    {
+      "incomeId": "integer",
+      "amount": "float",
+      "source": "string",
+      "date": "string"
+    }
+  ]
+}
+```
+
+**3. POST /expense - Adds a new expense for a user.**
+#### Body 
+```json
+{
+  "userId": "integer",
+  "amount": "float",
+  "category": "string",
+  "date": "string (ISO 8601 format)"
+}
+```
+#### Response
+```json
+{
+  "message": "Expense added successfully",
+  "expenseId": "integer"
+}
+```
+
+**4. GET /expense/{userId} - Retrieves all expense records for a specific user**
+#### Response
+```json
+{
+  "expenses": [
+    {
+      "expenseId": "integer",
+      "amount": "float",
+      "category": "string",
+      "date": "string"
+    }
+  ]
+}
+```
+
+**5. POST /savings - Sets a new savings goal for a user**
+#### Body 
+```json
+{
+  "userId": "integer",
+  "goal": "float",
+  "targetDate": "string (ISO 8601 format)"
+}
+```
+#### Response
+```json
+{
+  "message": "Savings goal set successfully",
+  "savingsId": "integer"
+}
+```
+
+**6. GET /savings/{userId} - Retrieves the savings goals for a specific user**
+#### Response
+```json
+{
+  "savingsGoals": [
+    {
+      "savingsId": "integer",
+      "goal": "float",
+      "targetDate": "string"
+    }
+  ]
+}
+```
+
+
+   
 
 ## Deployment and Scaling
 ### Containerization 
-Will use Docker to containerize both the User Service and Finance Service.
+Each microservice will be packaged in a separate Docker container.
 ### Orchestration
-Will use Kubernetes to orchestrate multiple instances of these services. This will allow my app to scale as more users register or track their finances.
+For orchestrating the containers, I will use the Kubernetes to ensure scaling, high availability, and load balancing.
