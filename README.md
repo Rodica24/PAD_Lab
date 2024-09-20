@@ -188,6 +188,17 @@ The API Gateway will manage the Redis cache. It will store frequently requested 
   ]
 }
 ```
+**7. WebSocket /ws/group-savings/{group_id}/updates - Real-time updates for group savings contributions**
+#### Body
+```json
+{
+  "user_id": "int",
+  "contribution_amount": "float",
+  "message": "string",
+  "timestamp": "string (ISO 8601 format)"
+}
+```
+
 
 
    
