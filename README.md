@@ -1,7 +1,7 @@
 # Personal Finance Tracker
 
 ## Application suitability
-A personal finance tracker involves multiple components such as user authentication, expense and income tracking or savings goal management. That's why I think this idea is a good fit for a microservices architecture, due to its requirement for individual development, scalability, and clear service boundaries. The separation into two different microservices (user and finance service) will ensures that each component can be managed and maintained independently while addressing the core functionalities of the application.
+A personal finance tracker involves multiple components such as user authentication, expense and income tracking or savings goal management. That's why I think this idea is a good fit for a microservices architecture, due to its requirement for individual development, scalability, and clear service boundaries. Microservices allow each component to evolve independently. The separation into two different microservices (user and finance service) will ensures that each component can be managed and maintained independently while addressing the core functionalities of the application.
 
 ### Real-world examples
 * **Mint**, utilizes microservices to manage various aspects of personal finance, including user authentication and financial data processing. 
@@ -9,9 +9,9 @@ A personal finance tracker involves multiple components such as user authenticat
 
 ## Service Boundaries
 I plan on having two microservices and an API Gateway:
-* User service: Handles user registration, login, authentication, and profile management.
-* Finance service: Manages all financial data (income, expenses, and savings goals).
-* API Gateway: Centralized access point for clients that routes incoming requests to User Service or Finance Service based on the request path.
+* User service: This microservice will handle user registration, login, authentication, and profile management. It is responsible for securing user data and generating JWT tokens for session management.
+* Finance service: This microservice will handle the financial data of users. It will manage the income, expenses, savings goals, and support the group savings challenge, which will leverage WebSocket communication for real-time updates.
+* API Gateway: Centralized access point for clients that routes incoming requests to User Service or Finance Service based on the request path. The gateway will also manage caching to improve performance and reduce the load on services.
 
 ![image](https://github.com/user-attachments/assets/fe3826c7-9dd5-4d45-972e-4814721aa357)
 
@@ -19,33 +19,31 @@ I plan on having two microservices and an API Gateway:
 ## Technology Stack and Communication Patterns
 ### Service 1: User Service (Python)
 
->#### Framework: 
->FastAPI (for building APIs with Python.)
->#### Database: 
->PostgreSQL
->#### Authentication: 
->JWT (JSON Web Tokens)
+#### Framework: 
+FastAPI (for building APIs with Python)
+#### Database: 
+PostgreSQL
+#### Authentication: 
+JWT (JSON Web Tokens)
 
 ### Service 2: Finance Service (Python)
->#### Framework:
->FastAPI (Python) for handling recommendations (RESTful API).
->#### Database:
->PostgreSQL
->
->Redis: For managing WebSocket sessions in real-time discussions.
+#### Framework:
+FastAPI for handling financial data
+#### Database:
+PostgreSQL
 
 ### API Gateway
->Framework: Express.js (Node.js) to serve as a central entry point for external clients and route requests to appropriate microservices
+Framework: Express.js (Node.js) to serve as a central entry point for external clients and route requests to appropriate microservices
 
 ### Communication Patterns
->#### RESTful APIs:
->Used for HTTP communication between external clients and the User Service, as well as for basic interactions with the Financial Service.
->#### gRPC:
->For efficient communication between services and service discovery.
->#### WebSocket:
->For real-time, bidirectional communication between the client and the Financial Service, facilitating live updates for group savings goals.
->#### Caching:
-Redis is used to cache frequent queries and updates in the Financial Service, improving performance and reducing latency.
+#### RESTful APIs:
+Used for HTTP communication between external clients and the User Service, as well as for basic interactions with the Financial Service.
+#### gRPC:
+Internal communication between the services will use gRPC. This protocol is faster and more efficient than REST, especially when handling internal, high-volume service-to-service communication.
+#### WebSocket:
+WebSockets will be used for the group savings challenge feature. Clients will open WebSocket connections to the Finance Service, receiving real-time updates on the group's savings progress.
+#### Caching:
+The API Gateway will manage the Redis cache. It will store frequently requested data such as user profiles and financial summaries.
 
 
 ## Data Management Design
