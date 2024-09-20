@@ -13,7 +13,7 @@ I plan on having two microservices and an API Gateway:
 * Finance service: This microservice will handle the financial data of users. It will manage the income, expenses, savings goals, and support the group savings challenge, which will leverage WebSocket communication for real-time updates.
 * API Gateway: Centralized access point for clients that routes incoming requests to User Service or Finance Service based on the request path. The gateway will also manage caching to improve performance and reduce the load on services.
 
-![image](https://github.com/user-attachments/assets/fe3826c7-9dd5-4d45-972e-4814721aa357)
+![image](https://github.com/user-attachments/assets/221a8cd6-bbef-4a38-9912-a1439daf3fe4)
 
 
 ## Technology Stack and Communication Patterns
