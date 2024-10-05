@@ -22,15 +22,15 @@ I plan on having two microservices and an API Gateway:
 #### Framework: 
 FastAPI (for building APIs with Python)
 #### Database: 
-PostgreSQL
+PostgreSQL, SQLite
 #### Authentication: 
 JWT (JSON Web Tokens)
 
 ### Service 2: Finance Service (Python)
 #### Framework:
-FastAPI for handling financial data
+Flask
 #### Database:
-PostgreSQL
+PostgreSQL, SQLite
 
 ### API Gateway
 Framework: Express.js (Node.js) to serve as a central entry point for external clients and route requests to appropriate microservices
