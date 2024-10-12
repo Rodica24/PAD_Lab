@@ -1,115 +1,133 @@
 const express = require('express');
 const axios = require('axios');
-const redis = require('redis');
+const { createServer } = require('http');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+const CircuitBreaker = require('./circuitBreaker');
+const serviceDiscovery = require('./serviceDiscovery');
 
+// Initialize Express app
 const app = express();
-const cache = redis.createClient();
+app.use(express.json());
 
-const USER_SERVICE_URL = 'http://localhost:5000';
-const FINANCE_SERVICE_URL = 'http://localhost:5001';
+// Register replicas for UserService and FinanceService
+serviceDiscovery.register('UserService', [
+  'http://localhost:5000',
+  'http://localhost:5005',
+  'http://localhost:5010'
+]);
 
-// Connect to Redis and handle errors
-cache.on('error', (err) => {
-  console.log('Redis Client Error', err);
+serviceDiscovery.register('FinanceService', [
+  'http://localhost:5003',
+  'http://localhost:5008',
+  'http://localhost:5013'
+]);
+
+serviceDiscovery.register('FinanceWebSocketService', [
+  'ws://localhost:5001',  // WebSocket instance 1
+  'ws://localhost:5006',  // WebSocket instance 2
+  'ws://localhost:5011'   // WebSocket instance 3
+]);
+
+// Circuit breaker instances
+const userServiceCircuitBreaker = new CircuitBreaker(3, 10000);  // Trip after 3 failures, retry after 10 seconds
+const financeServiceCircuitBreaker = new CircuitBreaker(3, 10000);
+
+// Retry logic for circuit breaker
+async function makeServiceRequest(circuitBreaker, serviceUrl, reqBody, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        if (!circuitBreaker.canRequest()) {
+            return { error: 'Service is temporarily unavailable due to repeated failures. Please try again later.' };
+        }
+
+        try {
+            const response = await axios.post(serviceUrl, reqBody);
+            circuitBreaker.reset();  // Reset breaker on success
+            return response.data;
+        } catch (error) {
+            console.log(`Attempt ${attempt} failed for service: ${serviceUrl}`);
+            circuitBreaker.recordFailure();  // Record failure on each error
+            if (attempt === retries) {
+                return { error: 'Service failed after 3 attempts.' };  // Give up after 3 attempts
+            }
+        }
+    }
+}
+
+// Proxy for WebSocket connections to FinanceService (port 5001) - assuming single WebSocket endpoint for simplicity
+const financeServiceProxy = createProxyMiddleware({
+  target: 'http://localhost:5001',
+  changeOrigin: true,
+  ws: true,
+});
+app.use('/socket', financeServiceProxy);
+
+// REST API Routes:
+
+// Forward POST requests to FinanceService using Circuit Breaker and Round Robin Load Balancing
+app.post('/finance/transactions', async (req, res) => {
+  const financeServiceUrl = serviceDiscovery.getNextServiceUrl('FinanceService');
+  if (!financeServiceUrl) {
+    return res.status(500).json({ error: 'FinanceService is unavailable' });
+  }
+
+  const result = await makeServiceRequest(financeServiceCircuitBreaker, `${financeServiceUrl}/transactions`, req.body);
+
+  if (result.error) {
+    return res.status(500).json(result);  // Send error response if circuit breaker is tripped
+  }
+
+  res.status(200).json(result);  // Success response
 });
 
-(async () => {
-  // Await Redis connection
-  await cache.connect();
-})();
+// Forward POST requests to UserService using Circuit Breaker and Round Robin Load Balancing
+app.post('/register', async (req, res) => {
+  const userServiceUrl = serviceDiscovery.getNextServiceUrl('UserService');
+  if (!userServiceUrl) {
+    return res.status(500).json({ error: 'UserService is unavailable' });
+  }
 
-const CACHE_EXPIRY_TIME = 60; // Cache expiry time in seconds
+  const result = await makeServiceRequest(userServiceCircuitBreaker, `${userServiceUrl}/register`, req.body);
 
-// Middleware to parse JSON bodies
-app.use(express.json());
+  if (result.error) {
+    return res.status(500).json(result);  // Send error response if circuit breaker is tripped
+  }
+
+  res.status(200).json(result);  // Success response
+});
+
+// Login request with WebSocket URL in the response and Circuit Breaker logic
+app.post('/login', async (req, res) => {
+  const userServiceUrl = serviceDiscovery.getNextServiceUrl('UserService');
+  const websocketUrl = serviceDiscovery.getNextServiceUrl('FinanceWebSocketService');  // Get WebSocket instance
+
+  const result = await makeServiceRequest(userServiceCircuitBreaker, `${userServiceUrl}/login`, req.body);
+
+  if (result.error) {
+    return res.status(500).json(result);  // Send error response if circuit breaker is tripped
+  }
+
+  res.status(200).json({
+    ...result,
+    websocket_url: websocketUrl  // Include WebSocket URL in the response
+  });
+});
 
 // Status endpoint for the API Gateway
 app.get('/status', (req, res) => {
-  res.status(200).json({ status: 'API Gateway is running' });
+  res.json({ status: 'API Gateway is running', uptime: process.uptime() });
 });
 
-// Get user info with caching
-app.get('/get_user/:user_id', async (req, res) => {
-  const { user_id } = req.params;
-
-  try {
-    const cachedUser = await cache.get(`user:${user_id}`);
-    if (cachedUser) {
-      return res.status(200).json({ source: 'cache', data: JSON.parse(cachedUser) });
-    }
-
-    const response = await axios.get(`${USER_SERVICE_URL}/users/${user_id}`);
-
-    if (response.headers['content-type'].includes('application/json')) {
-      const user = response.data;
-
-      await cache.setEx(`user:${user_id}`, CACHE_EXPIRY_TIME, JSON.stringify(user));
-
-      return res.status(200).json({ source: 'service', data: user });
-    } else {
-      return res.status(500).json({ error: 'Invalid response from User Service' });
-    }
-  } catch (error) {
-    return res.status(500).json({ error: 'User service error', details: error.message });
-  }
+// Status endpoint for Service Discovery
+app.get('/discovery/status', async (req, res) => {
+  const serviceStatus = await serviceDiscovery.checkServices();
+  res.json({ status: 'Service Discovery is running', services: serviceStatus });
 });
 
-// Register a new user
-app.post('/register', async (req, res) => {
-  try {
-    const response = await axios.post(`${USER_SERVICE_URL}/register`, req.body);
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    return res.status(500).json({ error: 'User service error', details: error.message });
-  }
-});
+// Start the HTTP server for WebSocket and REST API
+const server = createServer(app);
 
-// Login a user
-app.post('/login', async (req, res) => {
-  try {
-    const response = await axios.post(`${USER_SERVICE_URL}/login`, req.body);
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    return res.status(500).json({ error: 'User service error', details: error.message });
-  }
-});
-
-// Get transaction info with caching
-app.get('/get_transaction/:transaction_id', async (req, res) => {
-  const { transaction_id } = req.params;
-
-  // Try to get the transaction from cache
-  try {
-    const cachedTransaction = await cache.get(`transaction:${transaction_id}`);
-    if (cachedTransaction) {
-      return res.status(200).json({ source: 'cache', data: JSON.parse(cachedTransaction) });
-    }
-
-    // If transaction is not in cache, call the finance service
-    const response = await axios.get(`${FINANCE_SERVICE_URL}/transactions/${transaction_id}`);
-    const transaction = response.data;
-
-    // Store the transaction data in cache with expiry time
-    await cache.setEx(`transaction:${transaction_id}`, CACHE_EXPIRY_TIME, JSON.stringify(transaction));
-
-    return res.status(200).json({ source: 'service', data: transaction });
-  } catch (error) {
-    return res.status(500).json({ error: 'Finance service error', details: error.message });
-  }
-});
-
-// Create a new transaction
-app.post('/transactions', async (req, res) => {
-  try {
-    const response = await axios.post(`${FINANCE_SERVICE_URL}/transactions`, req.body);
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    return res.status(500).json({ error: 'Finance service error', details: error.message });
-  }
-});
-
-// Start the API Gateway server
+// Start the API Gateway on port 5002
 const PORT = process.env.PORT || 5002;
-app.listen(PORT, () => {
-  console.log(`API Gateway running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`API Gateway running on http://localhost:${PORT}`);
 });

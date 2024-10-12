@@ -1,91 +1,86 @@
+import sys
+import time
+import grpc
+from concurrent import futures
 from flask import Flask, jsonify, request
-import redis
-import asyncio
-from flask_sqlalchemy import SQLAlchemy
+from flask_pymongo import PyMongo
 from werkzeug.security import generate_password_hash, check_password_hash
+import redis
+from bson import ObjectId
+import os
+import logging
+import user_service_pb2_grpc  # Import the generated gRPC code
+import user_service_pb2  # Import the generated gRPC messages
+from threading import Thread
 
+# Initialize Flask app
 app = Flask(__name__)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+# MongoDB configuration
+app.config['MONGO_URI'] = 'mongodb://localhost:27017/users'
+mongo = PyMongo(app)
 
+# Redis configuration
 cache = redis.Redis(host='localhost', port=6379)
 
-active_users_count = 0
-semaphore = asyncio.Semaphore(5)
-timeout_duration = 5
+# Use environment variable for the port, or default to 5000
+port = int(os.getenv("PORT", 5000))
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
-    def __repr__(self):
-        return f'<User {self.username}>'
+# Request counting variables for health monitoring
+request_counter = 0
+start_time = time.time()
+CRITICAL_LOAD_THRESHOLD = 60  # Define critical load, e.g., 60 requests per second
 
-with app.app_context():
-    db.create_all()
+# Helper function to check if load is critical
+def check_critical_load():
+    global request_counter, start_time
+    current_time = time.time()
+    elapsed_time = current_time - start_time
 
+    # If a second has passed, check the load
+    if elapsed_time >= 1:
+        if request_counter > CRITICAL_LOAD_THRESHOLD:
+            logging.warning(f"Critical Load Alert: {request_counter} requests in the last second")
+            # You can add more actions here, e.g., sending an email or Slack alert
+        request_counter = 0
+        start_time = current_time
+
+@app.before_request
+def before_request():
+    global request_counter
+    request_counter += 1
+    check_critical_load()
+
+# Flask API Endpoints
 @app.route('/status', methods=['GET'])
 def status():
-    return jsonify({'status': 'User Service is running', 'active_users': active_users_count}), 200
+    return jsonify({'status': f'User Service is running on port {port}'}), 200
 
-@app.route('/users/<int:id>', methods=['GET'])
-def get_user(id):
-    try:
-        cached_user = cache.get(f"user:{id}")
-        if cached_user:
-            return jsonify({'source': 'cache', 'username': cached_user.decode('utf-8')}), 200
-
-        user = User.query.get(id)
-        if user:
-            cache.set(f"user:{user.id}", user.username)
-            return jsonify({'source': 'database', 'id': user.id, 'username': user.username, 'email': user.email}), 200
-        else:
-            return jsonify({'error': 'User not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-async def handle_user_request(data):
-    async with semaphore:
-        username = data.get('username')
-        email = data.get('email')
-        password = data.get('password')
-
-        if not username or not email or not password:
-            return {'error': 'Username, email, and password are required'}, 400
-
-        hashed_password = generate_password_hash(password)
-
-        new_user = User(username=username, email=email, password=hashed_password)
-        db.session.add(new_user)
-        db.session.commit()
-
-        cache.set(f"user:{new_user.id}", new_user.username)
-
-        await asyncio.sleep(1)
-
-        return {'message': f'User {new_user.username} registered successfully'}
+@app.route('/users/<string:username>', methods=['GET'])
+def get_user(username):
+    user = mongo.db.users.find_one({'username': username})
+    if user:
+        return jsonify({'source': 'database', 'username': user['username'], 'email': user['email']}), 200
+    return jsonify({'error': 'User not found'}), 404
 
 @app.route('/register', methods=['POST'])
-async def register_user():
+def register_user():
     data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = generate_password_hash(data.get('password'))
 
-    try:
-        async with semaphore:
-            await asyncio.wait_for(handle_user_request(data), timeout=timeout_duration)
-            global active_users_count
-            active_users_count += 1  # Increment active user count
-            return jsonify({'message': 'User registered successfully'}), 201
-    except asyncio.TimeoutError:
-        return jsonify({'error': 'Request timed out, please try again.'}), 408
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    if mongo.db.users.find_one({'username': username}):
+        return jsonify({'error': 'User already exists'}), 400
+
+    mongo.db.users.insert_one({'username': username, 'email': email, 'password': password})
+    return jsonify({'message': 'User registered successfully'}), 201
 
 @app.route('/login', methods=['POST'])
-async def login_user():
+def login_user():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
@@ -93,17 +88,51 @@ async def login_user():
     if not username or not password:
         return jsonify({'error': 'Username and password are required'}), 400
 
-    user = User.query.filter_by(username=username).first()
+    user = mongo.db.users.find_one({'username': username})
 
-    if user and check_password_hash(user.password, password):
-        cache.set('logged_in_user', user.id)
+    if user and check_password_hash(user['password'], password):
+        user_id_str = str(user['_id'])  # Convert ObjectId to string
+        cache.set('logged_in_user', user_id_str)  # Store the user_id in Redis as a string
         return jsonify({
-            'message': f'User {user.username} logged in successfully',
-            'id': user.id
+            'message': f'User {user["username"]} logged in successfully',
+            'id': user_id_str  # Return user_id as a string
         }), 200
     else:
         return jsonify({'error': 'Invalid username or password'}), 401
 
+# Implement the gRPC Service class
+class UserServicer(user_service_pb2_grpc.UserServiceServicer):
+    def GetUser(self, request, context):
+        # Logic for fetching a user through gRPC
+        user = mongo.db.users.find_one({'username': request.username})
+        if user:
+            return user_service_pb2.GetUserResponse(
+                username=user['username'],
+                email=user['email'],
+                message='User found'
+            )
+        else:
+            context.set_details('User not found')
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            return user_service_pb2.GetUserResponse(message="User not found")
 
+# gRPC Health Check Service (Optional, in case you want to monitor gRPC service health)
+class HealthServicer(user_service_pb2_grpc.HealthServicer):
+    def Check(self, request, context):
+        return user_service_pb2.HealthCheckResponse(status=user_service_pb2.HealthCheckResponse.SERVING)
+
+# Run gRPC Server in a separate thread
+def serve_grpc():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    user_service_pb2_grpc.add_UserServiceServicer_to_server(UserServicer(), server)
+    server.add_insecure_port('[::]:50051')  # gRPC server listens on port 50051
+    print("Starting gRPC server on port 50051...")
+    server.start()
+    server.wait_for_termination()
+
+# Run Flask and gRPC in parallel
 if __name__ == '__main__':
-    app.run(port=5000)
+    grpc_thread = Thread(target=serve_grpc)
+    grpc_thread.start()
+    print(f"Starting UserService on port {port}")
+    app.run(port=port)

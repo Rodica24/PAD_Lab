@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package user_service;
+
+// The user service definition
+service UserService {
+    rpc GetUser (GetUserRequest) returns (GetUserResponse);
+}
+
+// The request message containing the user's name.
+message GetUserRequest {
+    string username = 1;
+}
+
+// The response message containing the user's details.
+message GetUserResponse {
+    string username = 1;
+    string email = 2;
+    string message = 3;
+}
+
+// gRPC health check service
+service Health {
+    rpc Check (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+    enum ServingStatus {
+        UNKNOWN = 0;
+        SERVING = 1;
+        NOT_SERVING = 2;
+    }
+    ServingStatus status = 1;
+}

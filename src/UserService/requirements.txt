@@ -1,3 +1,5 @@
-flask
-redis
-asyncio
+Flask==2.2.2
+Flask-PyMongo==2.3.0
+redis==5.1.1
+Werkzeug==3.0.4
+pymongo==4.10.1
