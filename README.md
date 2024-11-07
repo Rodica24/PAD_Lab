@@ -1,5 +1,11 @@
 # Personal Finance Tracker
 
+In order to run the project install and run Docker. After that run the following commands:
+```
+docker-compose build
+docker-compose up
+```
+
 ## Application suitability
 A personal finance tracker involves multiple components such as user authentication, expense and income tracking or savings goal management. That's why I think this idea is a good fit for a microservices architecture, due to its requirement for individual development, scalability, and clear service boundaries. Microservices allow each component to evolve independently. The separation into two different microservices (user and finance service) will ensures that each component can be managed and maintained independently while addressing the core functionalities of the application.
 
@@ -206,5 +212,19 @@ The API Gateway will manage the Redis cache. It will store frequently requested 
 ## Deployment and Scaling
 ### Containerization 
 Each microservice will be packaged in a separate Docker container.
-### Orchestration
-For orchestrating the containers, I will use the Kubernetes to ensure scaling, high availability, and load balancing.
+
+## Updated Architecture:
+![Untitled Diagram drawio (4)](https://github.com/user-attachments/assets/b6638c30-cc7f-41a5-a6e9-f4acea6f6d04)
+
+The improved diagram with the new components added consists of:
+
+The **Saga Coordinator**, added to the API Gateway, manages complex transactions that take longer and involve multiple services, especially in the Finance Service. It ensures that all parts of a transaction are eventually consistent without needing a strict 2-phase commit.
+
+**Consistent Hashing for Cache (Redis)**, the Redis Cache now uses consistent hashing to distribute data across cache nodes. This setup ensures that data remains accessible even if individual nodes fail, improving scalability and fault tolerance. It helps with load distribution and high availability of frequently accessed data.
+
+**User Database Replication** (Master-Slave Setup), the User Database has been set up with a master-replica (slave) configuration. The "User DBMaster" node serves as the main data source, while "User DBSlave1" and "User DBSlave2" provide redundancy. This setup improves high availability, as replicas can take over in case the master node fails, ensuring continuous data accessibility.
+
+A **Staging Area and Data Warehouse** have been added to the architecture for data analysis and reporting. Data from the User and Finance databases is periodically extracted, transformed, and loaded (ETL) into the warehouse, allowing for efficient reporting without impacting operational performance. 
+
+The **ELK Stack** has been added to provide centralized logging and monitoring across all services. Each service sends logs to Logstash, which processes and stores them in Elasticsearch. Kibana enables visualization and analysis of these logs, making it easier to monitor system health, troubleshoot issues, and gain insights into usage patterns.
+
