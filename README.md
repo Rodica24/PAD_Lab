@@ -55,6 +55,8 @@ The API Gateway will manage the Redis cache. It will store frequently requested 
 ## Data Management Design
 ### User service endpoints:
 **1. POST /user/register - Registers a new user**
+
+The first endpoint to be accessed. Registering a user account stores their credentials in the database, which is essential because other endpoints require a user account to authenticate requests.
 #### Body   
 ```json
 {
